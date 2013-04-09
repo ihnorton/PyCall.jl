@@ -63,7 +63,7 @@ we could call the Newton solver in scipy.optimize via:
     @pyimport scipy.optimize as so
     so.newton(x -> cos(x) - x, 1)
 
-The biggest diffence from Python is that object attributes/members are
+The biggest difference from Python is that object attributes/members are
 accessed with `o[:attribute]` rather than `o.attribute`.  (This is
 because Julia does not permit overloading the `.` operator yet.)  See
 also the section on `PyObject` below, as well as the `pywrap` function
