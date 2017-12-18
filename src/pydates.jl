@@ -8,6 +8,8 @@
 # Fortunately, they don't seem to have changed much since Python 2.7, with
 # the biggest difference being the use of a 64-bit hash type.
 
+@static if VERSION > v"0.7-" using Dates end
+
 immutable PyDateTime_CAPI
     # type objects:
     DateType::PyPtr

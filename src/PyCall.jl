@@ -93,8 +93,8 @@ someobject)`.   This procedure will properly handle Python's reference counting
 PyNULL() = PyObject(PyPtr_NULL)
 
 function pydecref(o::PyObject)
-    ccall(@pysym(:Py_DecRef), Void, (PyPtr,), o.o)
-    o.o = PyPtr_NULL
+    ccall(@pysym(:Py_DecRef), Void, (PyPtr,), getfield(o, :o))
+    setfield!(o, :o, PyPtr_NULL)
     o
 end
 
@@ -104,7 +104,7 @@ function pyincref_(o::PyPtr)
 end
 
 function pyincref(o::PyObject)
-    pyincref_(o.o)
+    pyincref_(getfield(o, :o))
     o
 end
 
@@ -120,19 +120,19 @@ will be performed when `o` is garbage collected.  (This means that
 you can no longer use `o`.)  Used for passing objects to Python.
 """
 function pystealref!(o::PyObject)
-    optr = o.o
-    o.o = PyPtr_NULL # don't decref when o is gc'ed
+    optr = getfield(o, :o)
+    setfield!(o, :o, PyPtr_NULL) # don't decref when o is gc'ed
     return optr
 end
 
 function Base.copy!(dest::PyObject, src::PyObject)
     pydecref(dest)
-    dest.o = src.o
+    setfield!(dest, :o, getfield(src, :o))
     return pyincref(dest)
 end
 
 pyisinstance(o::PyObject, t::PyObject) =
-  t.o != C_NULL && ccall((@pysym :PyObject_IsInstance), Cint, (PyPtr,PyPtr), o, t.o) == 1
+  getfield(t, :o) != C_NULL && ccall((@pysym :PyObject_IsInstance), Cint, (PyPtr,PyPtr), o, getfield(t, :o)) == 1
 
 pyisinstance(o::PyObject, t::Union{Ptr{Void},PyPtr}) =
   t != C_NULL && ccall((@pysym :PyObject_IsInstance), Cint, (PyPtr,PyPtr), o, t) == 1
@@ -141,7 +141,7 @@ pyquery(q::Ptr{Void}, o::PyObject) =
   ccall(q, Cint, (PyPtr,), o) == 1
 
 # conversion to pass PyObject as ccall arguments:
-unsafe_convert(::Type{PyPtr}, po::PyObject) = po.o
+unsafe_convert(::Type{PyPtr}, po::PyObject) = getfield(po, :o)
 
 # use constructor for generic conversions to PyObject
 convert(::Type{PyObject}, o) = PyObject(o)
@@ -154,7 +154,7 @@ include("pyinit.jl")
 include("exception.jl")
 include("gui.jl")
 
-pytypeof(o::PyObject) = o.o == C_NULL ? throw(ArgumentError("NULL PyObjects have no Python type")) : PyObject(@pycheckn ccall(@pysym(:PyObject_Type), PyPtr, (PyPtr,), o))
+pytypeof(o::PyObject) = getfield(o, :o) == C_NULL ? throw(ArgumentError("NULL PyObjects have no Python type")) : PyObject(@pycheckn ccall(@pysym(:PyObject_Type), PyPtr, (PyPtr,), o))
 
 #########################################################################
 
@@ -204,7 +204,7 @@ in Python, but unlike `repr` it should never fail (falling back to `str` or to
 printing the raw pointer if necessary).
 """
 function pystring(o::PyObject)
-    if o.o == C_NULL
+    if getfield(o, :o) == C_NULL
         return "NULL"
     else
         s = ccall((@pysym :PyObject_Repr), PyPtr, (PyPtr,), o)
@@ -213,7 +213,7 @@ function pystring(o::PyObject)
             s = ccall((@pysym :PyObject_Str), PyPtr, (PyPtr,), o)
             if (s == C_NULL)
                 pyerr_clear()
-                return string(o.o)
+                return string(getfield(o, :o))
             end
         end
         return convert(AbstractString, PyObject(s))
@@ -227,7 +227,7 @@ end
 function Base.Docs.doc(o::PyObject)
     if haskey(o, "__doc__")
         d = o["__doc__"]
-        if d.o != pynothing[]
+        if getfield(d, :o) != pynothing[]
             return Base.Docs.Text(convert(AbstractString, d))
         end
     end
@@ -241,17 +241,17 @@ const pysalt = hash("PyCall.PyObject") # "salt" to mix in to PyObject hashes
 hashsalt(x) = hash(x, pysalt)
 
 function hash(o::PyObject)
-    if o.o == C_NULL
+    if getfield(o, :o) == C_NULL
         hashsalt(C_NULL)
     elseif is_pyjlwrap(o)
         # call native Julia hash directly on wrapped Julia objects,
         # since on 64-bit Windows the Python 2.x hash is only 32 bits
-        hashsalt(unsafe_pyjlwrap_to_objref(o.o))
+        hashsalt(unsafe_pyjlwrap_to_objref(getfield(o, :o)))
     else
         h = ccall((@pysym :PyObject_Hash), Py_hash_t, (PyPtr,), o)
         if h == -1 # error
             pyerr_clear()
-            return hashsalt(o.o)
+            return hashsalt(getfield(o, :o))
         end
         hashsalt(h)
     end
@@ -263,7 +263,7 @@ end
 # conversion.
 
 function getindex(o::PyObject, s::AbstractString)
-    if (o.o == C_NULL)
+    if (getfield(o, :o) == C_NULL)
         throw(ArgumentError("ref of NULL PyObject"))
     end
     p = ccall((@pysym :PyObject_GetAttrString), PyPtr, (PyPtr, Cstring), o, s)
@@ -275,9 +275,10 @@ function getindex(o::PyObject, s::AbstractString)
 end
 
 getindex(o::PyObject, s::Symbol) = convert(PyAny, getindex(o, string(s)))
+getproperty(o::PyCall.PyObject, s::Symbol) = s == :o ? getfield(o, s) : convert(PyAny, getindex(o, string(s)))
 
 function setindex!(o::PyObject, v, s::Union{Symbol,AbstractString})
-    if (o.o == C_NULL)
+    if (getfield(o, :o) == C_NULL)
         throw(ArgumentError("assign of NULL PyObject"))
     end
     if -1 == ccall((@pysym :PyObject_SetAttrString), Cint,
@@ -289,7 +290,7 @@ function setindex!(o::PyObject, v, s::Union{Symbol,AbstractString})
 end
 
 function haskey(o::PyObject, s::Union{Symbol,AbstractString})
-    if (o.o == C_NULL)
+    if (getfield(o, :o) == C_NULL)
         throw(ArgumentError("haskey of NULL PyObject"))
     end
     return 1 == ccall((@pysym :PyObject_HasAttrString), Cint,
@@ -822,7 +823,7 @@ end
 unshift!(a::PyObject, item) = insert!(a, 1, item)
 
 function prepend!(a::PyObject, items)
-    if isa(items,PyObject) && items.o == a.o
+    if isa(items,PyObject) && getfield(items, :o) == getfield(a, :o)
         # avoid infinite loop in prepending a to itself
         return prepend!(a, collect(items))
     end
@@ -863,16 +864,16 @@ for (mime, method) in ((MIME"text/html", "_repr_html_"),
     T = istextmime(mime()) ? AbstractString : Vector{UInt8}
     @eval begin
         function show(io::IO, mime::$mime, o::PyObject)
-            if o.o != C_NULL && haskey(o, $method)
+            if getfield(o, :o) != C_NULL && haskey(o, $method)
                 r = pycall(o[$method], PyObject)
-                r.o != pynothing[] && return write(io, convert($T, r))
+                getfield(r, :o) != pynothing[] && return write(io, convert($T, r))
             end
             throw(MethodError(show, (io, mime, o)))
         end
         mimewritable(::$mime, o::PyObject) =
-            o.o != C_NULL && haskey(o, $method) && let meth = o[$method]
-                meth.o != pynothing[] &&
-                pycall(meth, PyObject).o != pynothing[]
+            (getfield(o, :o) != C_NULL) && haskey(o, $method) && let meth = o[$method]
+                getfield(meth, :o) != pynothing[] &&
+                (ret = pycall(meth, PyObject); getfield(ret, :o) != pynothing[])
             end
     end
 end
